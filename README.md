@@ -1,11 +1,11 @@
-# pyco-tool
+# pyco-tools
 
-Small Tampermonkey userscripts for PyCo.
+Small Tampermonkey userscripts for [Python Coach](https://pythoncoach.org/).
 
 ## Structure
 
 ```text
-pyco-tool/
+pyco-tools/
 ├─ userscripts/
 │  └─ pyco-auto.user.js
 ├─ LICENSE
@@ -22,19 +22,18 @@ pyco-tool/
 4. clicks **Run**;
 5. clicks the next/continue button one second later.
 
-Because the site is not an SPA, Tampermonkey runs the userscript again after each full page navigation.
+Because Python Coach is not an SPA, Tampermonkey runs the userscript again after each full page navigation.
 
 ## Install
 
 1. Install Tampermonkey.
 2. Open `userscripts/pyco-auto.user.js`.
 3. Install the userscript.
-4. Replace the placeholder `@match` URL with the actual PyCo challenge URL pattern.
 
-Example:
+The userscript runs on:
 
-```js
-// @match        https://example.com/*
+```text
+https://pythoncoach.org/*
 ```
 
 ## License
