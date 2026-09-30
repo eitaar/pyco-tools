@@ -34,6 +34,14 @@ The userscript runs on:
 https://pythoncoach.org/challange
 ```
 
+## Disclaimer
+
+This project is unofficial and is not affiliated with or endorsed by Python Coach.
+
+It is provided for educational and experimental purposes only. You are responsible for ensuring that your use of these tools complies with Python Coach's terms and policies, as well as any rules set by your school or institution.
+
+The scripts depend on Python Coach's current page structure and may stop working if the website changes. Use them at your own risk.
+
 ## License
 
 MIT
