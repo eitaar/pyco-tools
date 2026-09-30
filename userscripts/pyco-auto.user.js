@@ -2,8 +2,8 @@
 // @name         PyCo Tools
 // @namespace    https://github.com/eitaar/pyco-tools
 // @version      1.0.0
-// @description  Automatically fills, runs, and advances PyCo challenges.
-// @match        https://pythoncoach.org/*
+// @description  Automatically fills, runs, and advances PythonCoach challenges.
+// @match        https://www.pythoncoach.org/challenge
 // @run-at       document-idle
 // @grant        none
 // @license      MIT
