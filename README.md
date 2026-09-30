@@ -22,8 +22,6 @@ pyco-tools/
 4. clicks **Run**;
 5. clicks the next/continue button one second later.
 
-Because Python Coach is not an SPA, Tampermonkey runs the userscript again after each full page navigation.
-
 ## Install
 
 1. Install Tampermonkey.
@@ -33,7 +31,7 @@ Because Python Coach is not an SPA, Tampermonkey runs the userscript again after
 The userscript runs on:
 
 ```text
-https://pythoncoach.org/*
+https://pythoncoach.org/challange
 ```
 
 ## License
