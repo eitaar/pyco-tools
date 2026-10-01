@@ -41,7 +41,7 @@ Each file is expected to contain a declaration such as:
 var lesson01Challenges = { ... };
 ```
 
-The JSON value on the right-hand side is parsed with `JSON.parse()`; the downloaded JavaScript is not evaluated.
+The challenge file is parsed as JavaScript because the object literals are not always strict JSON. The detected challenge object is then merged and serialized with `JSON.stringify()` for the final JSON output.
 
 ### Run
 
