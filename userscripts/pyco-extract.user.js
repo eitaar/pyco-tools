@@ -3,7 +3,7 @@
 // @namespace    https://github.com/eitaar/pyco-tools
 // @updateURL    https://raw.githubusercontent.com/eitaar/pyco-tools/main/userscripts/pyco-extract.user.js
 // @downloadURL  https://raw.githubusercontent.com/eitaar/pyco-tools/main/userscripts/pyco-extract.user.js
-// @version      3.0.0
+// @version      3.1.0
 // @description  Fetches all Python Coach challenge files and combines them into one JSON object.
 // @match        https://pythoncoach.org/*
 // @match        https://www.pythoncoach.org/*
@@ -35,6 +35,30 @@
         };
     }
 
+    async function isJavaScriptResource(url) {
+        let response = await fetch(url, {
+            method: "HEAD",
+            credentials: "same-origin",
+            cache: "no-store",
+        });
+
+        if (response.status === 405 || response.status === 501) {
+            response = await fetch(url, {
+                method: "GET",
+                credentials: "same-origin",
+                cache: "no-store",
+            });
+        }
+
+        if (!response.ok) {
+            return false;
+        }
+
+        const contentType = response.headers.get("content-type") ?? "";
+
+        return /(?:javascript|ecmascript)/i.test(contentType);
+    }
+
     function loadScript(url) {
         return new Promise((resolve, reject) => {
             const script = document.createElement("script");
@@ -59,6 +83,13 @@
         const { nn, variable, url } = lessonInfo(lessonNumber);
 
         if (unsafeWindow[variable] === undefined) {
+            const isJavaScript = await isJavaScriptResource(url);
+
+            if (!isJavaScript) {
+                console.log(`${PREFIX} lesson ${nn}: no JavaScript resource, skipping`);
+                return null;
+            }
+
             await loadScript(url);
         }
 
@@ -104,6 +135,10 @@
         for (let lessonNumber = 1; lessonNumber <= MAX_LESSON; lessonNumber += 1) {
             try {
                 const result = await loadLesson(lessonNumber);
+
+                if (result === null) {
+                    continue;
+                }
 
                 lessons[result.variable] = result.challenges;
 
