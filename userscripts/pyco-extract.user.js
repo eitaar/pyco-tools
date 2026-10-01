@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PyCo Challenge Extractor
 // @namespace    https://github.com/eitaar/pyco-tools
-// @version      1.0.0
-// @description  Extracts the current lessonXXChallenges global from Python Coach.
+// @version      1.1.0
+// @description  Extracts loaded lessonXXChallenges globals from Python Coach.
 // @match        https://pythoncoach.org/*
 // @match        https://www.pythoncoach.org/*
 // @run-at       document-idle
@@ -14,95 +14,124 @@
     "use strict";
 
     const PREFIX = "[PyCo Extractor]";
+    const MAX_LESSON = 99;
 
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     function challengeKeyForLesson(lessonNumber) {
-        const lesson = String(lessonNumber).padStart(2, "0");
-
-        if (!/^\d{2,}$/.test(lesson)) {
-            throw new Error(`${PREFIX} invalid lesson number: ${lessonNumber}`);
-        }
-
-        return `lesson${lesson}Challenges`;
-    }
-
-    function currentLessonNumber() {
-        const id = new URLSearchParams(location.search).get("id");
-
-        if (!id || !/^\d{2,}$/.test(id)) {
-            return null;
-        }
-
-        return id.slice(0, -1);
+        return `lesson${String(lessonNumber).padStart(2, "0")}Challenges`;
     }
 
     function readPageGlobal(name) {
         if (!/^lesson\d+Challenges$/.test(name)) {
-            throw new Error(`${PREFIX} refusing to evaluate unexpected global name: ${name}`);
+            throw new Error(`${PREFIX} invalid global name: ${name}`);
         }
 
-        // Important: lessonXXChallenges may be a top-level let/const binding.
-        // In that case it exists in the page's global lexical environment but is
-        // not available as window[name] / globalThis[name].
+        // Same idea as typing e.g. `lesson01Challenges` in DevTools.
+        // This also works when the page declared it with top-level let/const,
+        // where window[name] / globalThis[name] would be undefined.
         return (0, eval)(name);
     }
 
-    async function waitForPageGlobal(name, timeout = 15000) {
+    function tryReadPageGlobal(name) {
+        try {
+            return {
+                found: true,
+                value: readPageGlobal(name),
+            };
+        } catch (error) {
+            if (error instanceof ReferenceError) {
+                return {
+                    found: false,
+                    value: undefined,
+                };
+            }
+
+            throw error;
+        }
+    }
+
+    function scanLessonChallenges(maxLesson = MAX_LESSON) {
+        const extracted = {};
+
+        for (let lesson = 1; lesson <= maxLesson; lesson += 1) {
+            const key = challengeKeyForLesson(lesson);
+            const result = tryReadPageGlobal(key);
+
+            if (result.found) {
+                extracted[key] = result.value;
+            }
+        }
+
+        window.__pycoToolsExtracted = extracted;
+
+        return extracted;
+    }
+
+    async function waitForAnyLessonChallenges(timeout = 15000) {
         const start = Date.now();
 
         while (Date.now() - start < timeout) {
-            try {
-                const value = readPageGlobal(name);
+            const extracted = scanLessonChallenges();
 
-                if (value !== undefined) {
-                    return value;
-                }
-            } catch (error) {
-                if (!(error instanceof ReferenceError)) {
-                    throw error;
-                }
+            if (Object.keys(extracted).length > 0) {
+                return extracted;
             }
 
             await sleep(100);
         }
 
-        throw new Error(`${PREFIX} timed out waiting for ${name}`);
+        throw new Error(`${PREFIX} no lessonXXChallenges global found`);
     }
 
-    async function extractLessonChallenges(lessonNumber, timeout = 15000) {
+    function printExtracted(extracted) {
+        const keys = Object.keys(extracted);
+
+        console.log(`${PREFIX} found ${keys.length} lesson global(s):`, keys);
+        console.log(`${PREFIX} extracted:`, extracted);
+
+        for (const [key, challenges] of Object.entries(extracted)) {
+            console.log(`${PREFIX} ${key}:`, challenges);
+
+            try {
+                console.log(
+                    `${PREFIX} JSON for ${key}:\n${JSON.stringify(challenges, null, 2)}`,
+                );
+            } catch (error) {
+                console.warn(`${PREFIX} could not stringify ${key}:`, error);
+            }
+        }
+    }
+
+    // Manual helpers:
+    // pycoExtractLessonChallenges()
+    // pycoExtractLessonChallenges(1)
+    window.pycoExtractLessonChallenges = lessonNumber => {
+        if (lessonNumber === undefined) {
+            const extracted = scanLessonChallenges();
+            printExtracted(extracted);
+            return extracted;
+        }
+
         const key = challengeKeyForLesson(lessonNumber);
-        const challenges = await waitForPageGlobal(key, timeout);
+        const result = tryReadPageGlobal(key);
+
+        if (!result.found) {
+            throw new Error(`${PREFIX} ${key} is not loaded on this page`);
+        }
 
         window.__pycoToolsExtracted ??= {};
-        window.__pycoToolsExtracted[key] = challenges;
+        window.__pycoToolsExtracted[key] = result.value;
 
-        console.log(`${PREFIX} extracted ${key}:`, challenges);
-
-        try {
-            console.log(`${PREFIX} JSON for ${key}:\n${JSON.stringify(challenges, null, 2)}`);
-        } catch (error) {
-            console.warn(`${PREFIX} could not stringify ${key}:`, error);
-        }
-
-        return challenges;
-    }
-
-    // Expose a manual helper in case you want to request a specific loaded lesson:
-    // await pycoExtractLessonChallenges(3)
-    window.pycoExtractLessonChallenges = extractLessonChallenges;
+        console.log(`${PREFIX} ${key}:`, result.value);
+        return result.value;
+    };
 
     async function main() {
-        const lessonNumber = currentLessonNumber();
-
-        if (lessonNumber === null) {
-            console.log(`${PREFIX} no challenge id in the URL; helper installed as pycoExtractLessonChallenges()`);
-            return;
-        }
-
-        await extractLessonChallenges(lessonNumber);
+        const extracted = await waitForAnyLessonChallenges();
+        printExtracted(extracted);
     }
 
     main().catch(error => {
