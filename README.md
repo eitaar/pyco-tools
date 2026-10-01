@@ -52,7 +52,7 @@ The challenge files are loaded directly as same-origin `<script src>` resources.
 
 Use **Copy last JSON** to copy the most recent result again without refetching.
 
-Missing lesson files (`404`) are skipped. Other fetch or parse errors are reported in the console.
+Before injecting a lesson file, the extractor checks its response type. Non-JavaScript responses (including Python Coach's HTML fallback for missing lesson files) are skipped cleanly instead of being injected as scripts. Other load errors are reported in the console.
 ## Install
 
 1. Install Tampermonkey.
