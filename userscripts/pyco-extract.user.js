@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PyCo Challenge Extractor
 // @namespace    https://github.com/eitaar/pyco-tools
-// @version      1.1.0
+// @version      1.2.0
 // @description  Extracts loaded lessonXXChallenges globals from Python Coach.
 // @match        https://pythoncoach.org/*
 // @match        https://www.pythoncoach.org/*
@@ -14,7 +14,6 @@
     "use strict";
 
     const PREFIX = "[PyCo Extractor]";
-    const MAX_LESSON = 99;
 
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
@@ -24,49 +23,28 @@
         return `lesson${String(lessonNumber).padStart(2, "0")}Challenges`;
     }
 
-    function readPageGlobal(name) {
-        if (!/^lesson\d+Challenges$/.test(name)) {
-            throw new Error(`${PREFIX} invalid global name: ${name}`);
-        }
-
-        // Same idea as typing e.g. `lesson01Challenges` in DevTools.
-        // This also works when the page declared it with top-level let/const,
-        // where window[name] / globalThis[name] would be undefined.
-        return (0, eval)(name);
+    function readGlobal(name) {
+        return globalThis[name];
     }
 
-    function tryReadPageGlobal(name) {
-        try {
-            return {
-                found: true,
-                value: readPageGlobal(name),
-            };
-        } catch (error) {
-            if (error instanceof ReferenceError) {
-                return {
-                    found: false,
-                    value: undefined,
-                };
-            }
-
-            throw error;
-        }
+    function findLoadedChallengeGlobals() {
+        return Object.getOwnPropertyNames(globalThis)
+            .filter(name => /^lesson\d+Challenges$/.test(name))
+            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     }
 
-    function scanLessonChallenges(maxLesson = MAX_LESSON) {
+    function extractLoadedChallengeGlobals() {
         const extracted = {};
 
-        for (let lesson = 1; lesson <= maxLesson; lesson += 1) {
-            const key = challengeKeyForLesson(lesson);
-            const result = tryReadPageGlobal(key);
+        for (const name of findLoadedChallengeGlobals()) {
+            const value = readGlobal(name);
 
-            if (result.found) {
-                extracted[key] = result.value;
+            if (value !== undefined) {
+                extracted[name] = value;
             }
         }
 
         window.__pycoToolsExtracted = extracted;
-
         return extracted;
     }
 
@@ -74,7 +52,7 @@
         const start = Date.now();
 
         while (Date.now() - start < timeout) {
-            const extracted = scanLessonChallenges();
+            const extracted = extractLoadedChallengeGlobals();
 
             if (Object.keys(extracted).length > 0) {
                 return extracted;
@@ -90,7 +68,6 @@
         const keys = Object.keys(extracted);
 
         console.log(`${PREFIX} found ${keys.length} lesson global(s):`, keys);
-        console.log(`${PREFIX} extracted:`, extracted);
 
         for (const [key, challenges] of Object.entries(extracted)) {
             console.log(`${PREFIX} ${key}:`, challenges);
@@ -110,23 +87,23 @@
     // pycoExtractLessonChallenges(1)
     window.pycoExtractLessonChallenges = lessonNumber => {
         if (lessonNumber === undefined) {
-            const extracted = scanLessonChallenges();
+            const extracted = extractLoadedChallengeGlobals();
             printExtracted(extracted);
             return extracted;
         }
 
         const key = challengeKeyForLesson(lessonNumber);
-        const result = tryReadPageGlobal(key);
+        const challenges = readGlobal(key);
 
-        if (!result.found) {
+        if (challenges === undefined) {
             throw new Error(`${PREFIX} ${key} is not loaded on this page`);
         }
 
         window.__pycoToolsExtracted ??= {};
-        window.__pycoToolsExtracted[key] = result.value;
+        window.__pycoToolsExtracted[key] = challenges;
 
-        console.log(`${PREFIX} ${key}:`, result.value);
-        return result.value;
+        console.log(`${PREFIX} ${key}:`, challenges);
+        return challenges;
     };
 
     async function main() {
