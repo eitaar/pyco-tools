@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PyCo Challenge Extractor
 // @namespace    https://github.com/eitaar/pyco-tools
-// @version      2.0.0
+// @version      2.1.0
 // @description  Fetches all Python Coach challenge files and combines them into one JSON object.
 // @match        https://pythoncoach.org/*
 // @match        https://www.pythoncoach.org/*
@@ -33,22 +33,38 @@
         };
     }
 
-    function parseLessonSource(source, variable) {
-        const match = source.match(
-            new RegExp(
-                `^\\s*var\\s+${variable}\\s*=\\s*([\\s\\S]*?)\\s*;?\\s*$`,
-            ),
+    function parseLessonSource(source) {
+        const declaration = source.match(
+            /\b(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=/,
         );
 
-        if (!match) {
-            throw new Error(`could not find var ${variable} = ...`);
+        if (!declaration) {
+            throw new Error("could not find a challenge variable declaration");
         }
 
-        return JSON.parse(match[1]);
+        const variable = declaration[1];
+
+        // These files contain JavaScript object literals, not necessarily strict JSON
+        // (for example: unquoted keys, single quotes, or trailing commas).
+        // Evaluate the fetched same-origin script inside an isolated Function scope,
+        // then immediately serialize the resulting plain data back to JSON later.
+        const challenges = Function(
+            `"use strict";\n${source}\nreturn ${variable};`,
+        )();
+
+        if (
+            challenges === null ||
+            typeof challenges !== "object" ||
+            Array.isArray(challenges)
+        ) {
+            throw new Error(`${variable} did not evaluate to an object`);
+        }
+
+        return { variable, challenges };
     }
 
     async function fetchLesson(lessonNumber) {
-        const { nn, variable, url } = lessonInfo(lessonNumber);
+        const { nn, url } = lessonInfo(lessonNumber);
         const response = await fetch(url, {
             credentials: "same-origin",
         });
