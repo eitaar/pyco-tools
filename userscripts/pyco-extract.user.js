@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         PyCo Challenge Extractor
 // @namespace    https://github.com/eitaar/pyco-tools
-// @version      1.3.0
-// @description  Collects all loaded Python Coach challenge IDs into one JSON object.
+// @version      2.0.0
+// @description  Fetches all Python Coach challenge files and combines them into one JSON object.
 // @match        https://pythoncoach.org/*
 // @match        https://www.pythoncoach.org/*
-// @run-at       document-idle
-// @grant        none
+// @run-at       document-start
+// @grant        GM_registerMenuCommand
+// @grant        GM_setClipboard
 // @license      MIT
 // ==/UserScript==
 
@@ -14,140 +15,181 @@
     "use strict";
 
     const PREFIX = "[PyCo Extractor]";
-    const TIMEOUT = 15000;
-    const STABLE_FOR = 1000;
-    const POLL_INTERVAL = 100;
+    const MAX_LESSON = 99;
+    const CONCURRENCY = 6;
 
-    function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
+    let lastJSON = null;
+
+    function lessonInfo(lessonNumber) {
+        const nn = String(lessonNumber).padStart(2, "0");
+
+        return {
+            nn,
+            variable: `lesson${nn}Challenges`,
+            url: new URL(
+                `/js/challenges/lesson-${nn}-challenges.js`,
+                location.origin,
+            ).href,
+        };
     }
 
-    function challengeKeyForLesson(lessonNumber) {
-        return `lesson${String(lessonNumber).padStart(2, "0")}Challenges`;
-    }
+    function parseLessonSource(source, variable) {
+        const match = source.match(
+            new RegExp(
+                `^\\s*var\\s+${variable}\\s*=\\s*([\\s\\S]*?)\\s*;?\\s*$`,
+            ),
+        );
 
-    function findLoadedChallengeGlobals() {
-        return Object.getOwnPropertyNames(globalThis)
-            .filter(name => /^lesson\d+Challenges$/.test(name))
-            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-    }
-
-    function readLoadedLessons() {
-        const lessons = {};
-
-        for (const name of findLoadedChallengeGlobals()) {
-            const value = globalThis[name];
-
-            if (value !== undefined && value !== null) {
-                lessons[name] = value;
-            }
+        if (!match) {
+            throw new Error(`could not find var ${variable} = ...`);
         }
 
-        return lessons;
+        return JSON.parse(match[1]);
     }
 
-    function flattenChallenges(lessons) {
-        const byId = {};
+    async function fetchLesson(lessonNumber) {
+        const { nn, variable, url } = lessonInfo(lessonNumber);
+        const response = await fetch(url, {
+            credentials: "same-origin",
+        });
 
-        for (const [lessonName, challenges] of Object.entries(lessons)) {
-            if (typeof challenges !== "object" || challenges === null) {
-                console.warn(`${PREFIX} skipping non-object ${lessonName}`, challenges);
-                continue;
-            }
-
-            for (const [id, challenge] of Object.entries(challenges)) {
-                if (Object.hasOwn(byId, id)) {
-                    console.warn(
-                        `${PREFIX} duplicate challenge id ${id}; overwriting previous value`,
-                    );
-                }
-
-                byId[id] = challenge;
-            }
+        if (response.status === 404) {
+            return null;
         }
 
+        if (!response.ok) {
+            throw new Error(`lesson ${nn}: HTTP ${response.status}`);
+        }
+
+        const source = await response.text();
+        const challenges = parseLessonSource(source, variable);
+
+        console.log(
+            `${PREFIX} lesson ${nn}: ${Object.keys(challenges).length} challenge(s)`,
+        );
+
+        return {
+            lessonNumber,
+            variable,
+            challenges,
+        };
+    }
+
+    function sortByNumericKey(object) {
         return Object.fromEntries(
-            Object.entries(byId).sort(([a], [b]) =>
+            Object.entries(object).sort(([a], [b]) =>
                 a.localeCompare(b, undefined, { numeric: true }),
             ),
         );
     }
 
-    async function waitUntilLessonGlobalsStable(
-        timeout = TIMEOUT,
-        stableFor = STABLE_FOR,
-    ) {
-        const started = Date.now();
-        let lastSignature = "";
-        let stableSince = null;
-        let latest = {};
+    async function fetchAllChallenges() {
+        console.log(`${PREFIX} fetching lessons 01-${MAX_LESSON}...`);
 
-        while (Date.now() - started < timeout) {
-            latest = readLoadedLessons();
-            const names = Object.keys(latest);
-            const signature = names.join("\n");
+        const queue = Array.from(
+            { length: MAX_LESSON },
+            (_, index) => index + 1,
+        );
 
-            if (names.length > 0) {
-                if (signature === lastSignature) {
-                    stableSince ??= Date.now();
+        const lessons = {};
+        const allChallenges = {};
+        const errors = [];
+        let cursor = 0;
 
-                    if (Date.now() - stableSince >= stableFor) {
-                        return latest;
+        async function worker() {
+            while (cursor < queue.length) {
+                const index = cursor;
+                cursor += 1;
+
+                const lessonNumber = queue[index];
+
+                try {
+                    const result = await fetchLesson(lessonNumber);
+
+                    if (!result) {
+                        continue;
                     }
-                } else {
-                    lastSignature = signature;
-                    stableSince = Date.now();
+
+                    lessons[result.variable] = result.challenges;
+
+                    for (const [id, challenge] of Object.entries(result.challenges)) {
+                        if (Object.hasOwn(allChallenges, id)) {
+                            console.warn(
+                                `${PREFIX} duplicate challenge ID ${id}; overwriting previous value`,
+                            );
+                        }
+
+                        allChallenges[id] = challenge;
+                    }
+                } catch (error) {
+                    errors.push({
+                        lesson: lessonNumber,
+                        error: String(error),
+                    });
+
+                    console.error(
+                        `${PREFIX} lesson ${String(lessonNumber).padStart(2, "0")} failed:`,
+                        error,
+                    );
                 }
             }
-
-            await sleep(POLL_INTERVAL);
         }
 
-        if (Object.keys(latest).length > 0) {
-            return latest;
-        }
+        await Promise.all(
+            Array.from(
+                { length: CONCURRENCY },
+                () => worker(),
+            ),
+        );
 
-        throw new Error(`${PREFIX} no lessonXXChallenges globals found`);
-    }
+        const sortedLessons = Object.fromEntries(
+            Object.entries(lessons).sort(([a], [b]) =>
+                a.localeCompare(b, undefined, { numeric: true }),
+            ),
+        );
+        const sortedChallenges = sortByNumericKey(allChallenges);
+        const json = JSON.stringify(sortedChallenges, null, 2);
 
-    function publish(lessons) {
-        const byId = flattenChallenges(lessons);
-        const json = JSON.stringify(byId, null, 2);
-
-        window.__pycoToolsLessons = lessons;
-        window.__pycoToolsAllChallenges = byId;
-        window.__pycoToolsJSON = json;
+        lastJSON = json;
 
         console.log(
-            `${PREFIX} collected ${Object.keys(byId).length} challenge IDs from ${Object.keys(lessons).length} lesson globals`,
+            `${PREFIX} done: ${Object.keys(sortedChallenges).length} challenge IDs from ${Object.keys(sortedLessons).length} lessons`,
         );
-        console.log(`${PREFIX} all challenges JSON:\n${json}`);
 
-        return byId;
-    }
-
-    // Manual helpers:
-    // pycoExtractAllChallenges()
-    // pycoExtractLessonChallenges(1)
-    window.pycoExtractAllChallenges = () => publish(readLoadedLessons());
-
-    window.pycoExtractLessonChallenges = lessonNumber => {
-        const key = challengeKeyForLesson(lessonNumber);
-        const challenges = globalThis[key];
-
-        if (challenges === undefined) {
-            throw new Error(`${PREFIX} ${key} is not loaded on this page`);
+        if (errors.length > 0) {
+            console.warn(`${PREFIX} ${errors.length} lesson(s) failed:`, errors);
         }
 
-        return JSON.stringify(challenges, null, 2);
-    };
+        console.log(`${PREFIX} combined JSON:\n${json}`);
 
-    async function main() {
-        const lessons = await waitUntilLessonGlobalsStable();
-        publish(lessons);
+        GM_setClipboard(json, "text");
+        console.log(`${PREFIX} combined JSON copied to clipboard`);
+
+        return {
+            lessons: sortedLessons,
+            challenges: sortedChallenges,
+            json,
+            errors,
+        };
     }
 
-    main().catch(error => {
-        console.error(`${PREFIX} error:`, error);
+    GM_registerMenuCommand("Fetch all challenges", () => {
+        fetchAllChallenges().catch(error => {
+            console.error(`${PREFIX} fatal error:`, error);
+        });
     });
+
+    GM_registerMenuCommand("Copy last JSON", () => {
+        if (lastJSON === null) {
+            console.warn(`${PREFIX} no JSON collected yet`);
+            return;
+        }
+
+        GM_setClipboard(lastJSON, "text");
+        console.log(`${PREFIX} combined JSON copied to clipboard`);
+    });
+
+    console.log(
+        `${PREFIX} ready. Open the Tampermonkey menu and choose "Fetch all challenges".`,
+    );
 })();
