@@ -25,37 +25,35 @@ pyco-tools/
 
 ## PyCo Challenge Extractor
 
-`userscripts/pyco-extract.user.js` reads loaded globals such as
-`lesson01Challenges` directly from `globalThis`, using the same access
-method as `pyco-auto.user.js`.
+`userscripts/pyco-extract.user.js` does not inspect the DOM or wait for page globals.
+It fetches Python Coach's static challenge files directly:
 
-It waits until the set of loaded `lesson{nn}Challenges` globals stabilizes,
-then collects every challenge ID from every loaded lesson and flattens them
-into one JSON object:
-
-```json
-{
-  "101": { "...": "..." },
-  "102": { "...": "..." },
-  "201": { "...": "..." }
-}
+```text
+/js/challenges/lesson-01-challenges.js
+/js/challenges/lesson-02-challenges.js
+...
+/js/challenges/lesson-99-challenges.js
 ```
 
-The final results are exposed as:
+Each file is expected to contain a declaration such as:
 
 ```js
-window.__pycoToolsLessons        // raw lessonXXChallenges objects
-window.__pycoToolsAllChallenges  // flattened object keyed by challenge ID
-window.__pycoToolsJSON           // final formatted JSON string
+var lesson01Challenges = { ... };
 ```
 
-Manual helpers:
+The JSON value on the right-hand side is parsed with `JSON.parse()`; the downloaded JavaScript is not evaluated.
 
-```js
-pycoExtractAllChallenges()
-pycoExtractLessonChallenges(1)
-```
+### Run
 
+1. Open any page on `pythoncoach.org`.
+2. Open the Tampermonkey menu.
+3. Choose **Fetch all challenges**.
+4. All available lessons are fetched and merged by challenge ID.
+5. The final JSON is printed to DevTools and copied to the clipboard.
+
+Use **Copy last JSON** to copy the most recent result again without refetching.
+
+Missing lesson files (`404`) are skipped. Other fetch or parse errors are reported in the console.
 ## Install
 
 1. Install Tampermonkey.
