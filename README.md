@@ -25,27 +25,34 @@ pyco-tools/
 
 ## PyCo Challenge Extractor
 
-`userscripts/pyco-extract.user.js` extracts loaded globals such as
+`userscripts/pyco-extract.user.js` reads loaded globals such as
 `lesson01Challenges` directly from `globalThis`, using the same access
 method as `pyco-auto.user.js`.
 
-It automatically detects loaded globals matching:
+It waits until the set of loaded `lesson{nn}Challenges` globals stabilizes,
+then collects every challenge ID from every loaded lesson and flattens them
+into one JSON object:
 
-```text
-lesson{nn}Challenges
+```json
+{
+  "101": { "...": "..." },
+  "102": { "...": "..." },
+  "201": { "...": "..." }
+}
 ```
 
-and logs each value plus a JSON representation to the console. Extracted
-values are also stored in:
+The final results are exposed as:
 
 ```js
-window.__pycoToolsExtracted
+window.__pycoToolsLessons        // raw lessonXXChallenges objects
+window.__pycoToolsAllChallenges  // flattened object keyed by challenge ID
+window.__pycoToolsJSON           // final formatted JSON string
 ```
 
-Manual helpers are available too:
+Manual helpers:
 
 ```js
-pycoExtractLessonChallenges()
+pycoExtractAllChallenges()
 pycoExtractLessonChallenges(1)
 ```
 
