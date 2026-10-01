@@ -1,6 +1,8 @@
 // ==UserScript==
 // @name         PyCo Challenge Extractor
 // @namespace    https://github.com/eitaar/pyco-tools
+// @updateURL    https://raw.githubusercontent.com/eitaar/pyco-tools/main/userscripts/pyco-extract.user.js
+// @downloadURL  https://raw.githubusercontent.com/eitaar/pyco-tools/main/userscripts/pyco-extract.user.js
 // @version      2.1.0
 // @description  Fetches all Python Coach challenge files and combines them into one JSON object.
 // @match        https://pythoncoach.org/*
