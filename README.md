@@ -25,23 +25,28 @@ pyco-tools/
 
 ## PyCo Challenge Extractor
 
-`userscripts/pyco-extract.user.js` extracts the current lesson's
-`lesson{nn}Challenges` value from Python Coach's page-level global scope.
+`userscripts/pyco-extract.user.js` extracts loaded globals such as
+`lesson01Challenges` directly from `globalThis`, using the same access
+method as `pyco-auto.user.js`.
 
-It:
+It automatically detects loaded globals matching:
 
-1. reads the current challenge ID from the URL;
-2. derives the corresponding global name, for example `lesson03Challenges`;
-3. resolves the value from the page's global lexical scope, including globals
-   declared with top-level `let` or `const`;
-4. logs the extracted object and its JSON representation to the console;
-5. exposes the result as `window.__pycoToolsExtracted[lessonXXChallenges]`.
+```text
+lesson{nn}Challenges
+```
 
-A helper is also exposed for manually extracting a lesson that is already
-loaded on the current page:
+and logs each value plus a JSON representation to the console. Extracted
+values are also stored in:
 
 ```js
-await pycoExtractLessonChallenges(3)
+window.__pycoToolsExtracted
+```
+
+Manual helpers are available too:
+
+```js
+pycoExtractLessonChallenges()
+pycoExtractLessonChallenges(1)
 ```
 
 ## Install
