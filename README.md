@@ -57,8 +57,9 @@ Missing lesson files (`404`) are skipped. Other fetch or parse errors are report
 ## Install
 
 1. Install Tampermonkey.
-2. Open the desired file under `userscripts/`.
+2. Open the raw userscript URL (recommended) or the desired file under `userscripts/`.
 3. Install the userscript.
+4. Existing installs of `pyco-extract.user.js` can update from the raw GitHub URL via the userscript metadata.
 
 The userscripts run on Python Coach pages under:
 
