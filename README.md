@@ -25,8 +25,7 @@ pyco-tools/
 
 ## PyCo Challenge Extractor
 
-`userscripts/pyco-extract.user.js` does not inspect the DOM or wait for page globals.
-It fetches Python Coach's static challenge files directly:
+`userscripts/pyco-extract.user.js` does not inspect the page DOM for challenge data. It loads Python Coach's static challenge files directly as same-origin scripts:
 
 ```text
 /js/challenges/lesson-01-challenges.js
@@ -41,7 +40,7 @@ Each file is expected to contain a declaration such as:
 var lesson01Challenges = { ... };
 ```
 
-The challenge object literal is parsed with JSON5 because the files are not always strict JSON (for example, they may use unquoted keys, single quotes, comments, or trailing commas). The script does not use `eval()` or `Function()`, so it works with Python Coach's Content Security Policy. The detected challenge objects are then merged and serialized with `JSON.stringify()` for the final JSON output.
+The challenge files are loaded directly as same-origin `<script src>` resources. Python Coach's own JavaScript engine evaluates them under the site's normal `script-src 'self'` Content Security Policy, so the extractor does not use `eval()`, `Function()`, or a custom object-literal parser. After each file loads, the corresponding `lessonNNChallenges` global is read from the page context, merged by challenge ID, and serialized with `JSON.stringify()` for the final JSON output.
 
 ### Run
 
