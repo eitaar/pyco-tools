@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PyCo Challenge Extractor
 // @namespace    https://github.com/eitaar/pyco-tools
-// @version      1.2.0
-// @description  Extracts loaded lessonXXChallenges globals from Python Coach.
+// @version      1.3.0
+// @description  Collects all loaded Python Coach challenge IDs into one JSON object.
 // @match        https://pythoncoach.org/*
 // @match        https://www.pythoncoach.org/*
 // @run-at       document-idle
@@ -14,6 +14,9 @@
     "use strict";
 
     const PREFIX = "[PyCo Extractor]";
+    const TIMEOUT = 15000;
+    const STABLE_FOR = 1000;
+    const POLL_INTERVAL = 100;
 
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
@@ -23,92 +26,125 @@
         return `lesson${String(lessonNumber).padStart(2, "0")}Challenges`;
     }
 
-    function readGlobal(name) {
-        return globalThis[name];
-    }
-
     function findLoadedChallengeGlobals() {
         return Object.getOwnPropertyNames(globalThis)
             .filter(name => /^lesson\d+Challenges$/.test(name))
             .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     }
 
-    function extractLoadedChallengeGlobals() {
-        const extracted = {};
+    function readLoadedLessons() {
+        const lessons = {};
 
         for (const name of findLoadedChallengeGlobals()) {
-            const value = readGlobal(name);
+            const value = globalThis[name];
 
-            if (value !== undefined) {
-                extracted[name] = value;
+            if (value !== undefined && value !== null) {
+                lessons[name] = value;
             }
         }
 
-        window.__pycoToolsExtracted = extracted;
-        return extracted;
+        return lessons;
     }
 
-    async function waitForAnyLessonChallenges(timeout = 15000) {
-        const start = Date.now();
+    function flattenChallenges(lessons) {
+        const byId = {};
 
-        while (Date.now() - start < timeout) {
-            const extracted = extractLoadedChallengeGlobals();
-
-            if (Object.keys(extracted).length > 0) {
-                return extracted;
+        for (const [lessonName, challenges] of Object.entries(lessons)) {
+            if (typeof challenges !== "object" || challenges === null) {
+                console.warn(`${PREFIX} skipping non-object ${lessonName}`, challenges);
+                continue;
             }
 
-            await sleep(100);
+            for (const [id, challenge] of Object.entries(challenges)) {
+                if (Object.hasOwn(byId, id)) {
+                    console.warn(
+                        `${PREFIX} duplicate challenge id ${id}; overwriting previous value`,
+                    );
+                }
+
+                byId[id] = challenge;
+            }
         }
 
-        throw new Error(`${PREFIX} no lessonXXChallenges global found`);
+        return Object.fromEntries(
+            Object.entries(byId).sort(([a], [b]) =>
+                a.localeCompare(b, undefined, { numeric: true }),
+            ),
+        );
     }
 
-    function printExtracted(extracted) {
-        const keys = Object.keys(extracted);
+    async function waitUntilLessonGlobalsStable(
+        timeout = TIMEOUT,
+        stableFor = STABLE_FOR,
+    ) {
+        const started = Date.now();
+        let lastSignature = "";
+        let stableSince = null;
+        let latest = {};
 
-        console.log(`${PREFIX} found ${keys.length} lesson global(s):`, keys);
+        while (Date.now() - started < timeout) {
+            latest = readLoadedLessons();
+            const names = Object.keys(latest);
+            const signature = names.join("\n");
 
-        for (const [key, challenges] of Object.entries(extracted)) {
-            console.log(`${PREFIX} ${key}:`, challenges);
+            if (names.length > 0) {
+                if (signature === lastSignature) {
+                    stableSince ??= Date.now();
 
-            try {
-                console.log(
-                    `${PREFIX} JSON for ${key}:\n${JSON.stringify(challenges, null, 2)}`,
-                );
-            } catch (error) {
-                console.warn(`${PREFIX} could not stringify ${key}:`, error);
+                    if (Date.now() - stableSince >= stableFor) {
+                        return latest;
+                    }
+                } else {
+                    lastSignature = signature;
+                    stableSince = Date.now();
+                }
             }
+
+            await sleep(POLL_INTERVAL);
         }
+
+        if (Object.keys(latest).length > 0) {
+            return latest;
+        }
+
+        throw new Error(`${PREFIX} no lessonXXChallenges globals found`);
+    }
+
+    function publish(lessons) {
+        const byId = flattenChallenges(lessons);
+        const json = JSON.stringify(byId, null, 2);
+
+        window.__pycoToolsLessons = lessons;
+        window.__pycoToolsAllChallenges = byId;
+        window.__pycoToolsJSON = json;
+
+        console.log(
+            `${PREFIX} collected ${Object.keys(byId).length} challenge IDs from ${Object.keys(lessons).length} lesson globals`,
+        );
+        console.log(`${PREFIX} all challenges JSON:\n${json}`);
+
+        return byId;
     }
 
     // Manual helpers:
-    // pycoExtractLessonChallenges()
+    // pycoExtractAllChallenges()
     // pycoExtractLessonChallenges(1)
-    window.pycoExtractLessonChallenges = lessonNumber => {
-        if (lessonNumber === undefined) {
-            const extracted = extractLoadedChallengeGlobals();
-            printExtracted(extracted);
-            return extracted;
-        }
+    window.pycoExtractAllChallenges = () => publish(readLoadedLessons());
 
+    window.pycoExtractLessonChallenges = lessonNumber => {
         const key = challengeKeyForLesson(lessonNumber);
-        const challenges = readGlobal(key);
+        const challenges = globalThis[key];
 
         if (challenges === undefined) {
             throw new Error(`${PREFIX} ${key} is not loaded on this page`);
         }
 
-        window.__pycoToolsExtracted ??= {};
-        window.__pycoToolsExtracted[key] = challenges;
-
-        console.log(`${PREFIX} ${key}:`, challenges);
-        return challenges;
+        return JSON.stringify(challenges, null, 2);
     };
 
     async function main() {
-        const extracted = await waitForAnyLessonChallenges();
-        printExtracted(extracted);
+        const lessons = await waitUntilLessonGlobalsStable();
+        publish(lessons);
     }
 
     main().catch(error => {
