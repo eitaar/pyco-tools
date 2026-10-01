@@ -41,7 +41,7 @@ Each file is expected to contain a declaration such as:
 var lesson01Challenges = { ... };
 ```
 
-The challenge file is parsed as JavaScript because the object literals are not always strict JSON. The detected challenge object is then merged and serialized with `JSON.stringify()` for the final JSON output.
+The challenge object literal is parsed with JSON5 because the files are not always strict JSON (for example, they may use unquoted keys, single quotes, comments, or trailing commas). The script does not use `eval()` or `Function()`, so it works with Python Coach's Content Security Policy. The detected challenge objects are then merged and serialized with `JSON.stringify()` for the final JSON output.
 
 ### Run
 
