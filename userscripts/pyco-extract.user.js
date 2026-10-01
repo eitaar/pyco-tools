@@ -78,10 +78,10 @@
         }
 
         const source = await response.text();
-        const challenges = parseLessonSource(source, variable);
+        const { variable, challenges } = parseLessonSource(source);
 
         console.log(
-            `${PREFIX} lesson ${nn}: ${Object.keys(challenges).length} challenge(s)`,
+            `${PREFIX} lesson ${nn} (${variable}): ${Object.keys(challenges).length} challenge(s)`,
         );
 
         return {
