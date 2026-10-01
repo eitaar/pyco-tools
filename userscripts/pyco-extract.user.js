@@ -3,14 +3,14 @@
 // @namespace    https://github.com/eitaar/pyco-tools
 // @updateURL    https://raw.githubusercontent.com/eitaar/pyco-tools/main/userscripts/pyco-extract.user.js
 // @downloadURL  https://raw.githubusercontent.com/eitaar/pyco-tools/main/userscripts/pyco-extract.user.js
-// @version      2.2.0
+// @version      3.0.0
 // @description  Fetches all Python Coach challenge files and combines them into one JSON object.
 // @match        https://pythoncoach.org/*
 // @match        https://www.pythoncoach.org/*
 // @run-at       document-start
-// @require      https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @grant        GM_registerMenuCommand
 // @grant        GM_setClipboard
+// @grant        unsafeWindow
 // @license      MIT
 // ==/UserScript==
 
@@ -19,7 +19,6 @@
 
     const PREFIX = "[PyCo Extractor]";
     const MAX_LESSON = 99;
-    const CONCURRENCY = 6;
 
     let lastJSON = null;
 
@@ -36,135 +35,45 @@
         };
     }
 
-    function extractObjectLiteral(source, fromIndex) {
-        const start = source.indexOf("{", fromIndex);
+    function loadScript(url) {
+        return new Promise((resolve, reject) => {
+            const script = document.createElement("script");
+            script.src = url;
+            script.async = false;
 
-        if (start === -1) {
-            throw new Error("could not find challenge object literal");
-        }
+            script.addEventListener("load", () => {
+                script.remove();
+                resolve();
+            }, { once: true });
 
-        let depth = 0;
-        let quote = null;
-        let escaped = false;
-        let lineComment = false;
-        let blockComment = false;
+            script.addEventListener("error", () => {
+                script.remove();
+                reject(new Error(`failed to load ${url}`));
+            }, { once: true });
 
-        for (let i = start; i < source.length; i += 1) {
-            const char = source[i];
-            const next = source[i + 1];
-
-            if (lineComment) {
-                if (char === "\n") {
-                    lineComment = false;
-                }
-                continue;
-            }
-
-            if (blockComment) {
-                if (char === "*" && next === "/") {
-                    blockComment = false;
-                    i += 1;
-                }
-                continue;
-            }
-
-            if (quote !== null) {
-                if (escaped) {
-                    escaped = false;
-                    continue;
-                }
-
-                if (char === "\\") {
-                    escaped = true;
-                    continue;
-                }
-
-                if (char === quote) {
-                    quote = null;
-                }
-
-                continue;
-            }
-
-            if (char === "/" && next === "/") {
-                lineComment = true;
-                i += 1;
-                continue;
-            }
-
-            if (char === "/" && next === "*") {
-                blockComment = true;
-                i += 1;
-                continue;
-            }
-
-            if (char === "'" || char === "\"") {
-                quote = char;
-                continue;
-            }
-
-            if (char === "{") {
-                depth += 1;
-                continue;
-            }
-
-            if (char === "}") {
-                depth -= 1;
-
-                if (depth === 0) {
-                    return source.slice(start, i + 1);
-                }
-            }
-        }
-
-        throw new Error("unterminated challenge object literal");
+            (document.head || document.documentElement).appendChild(script);
+        });
     }
 
-    function parseLessonSource(source) {
-        const declaration = source.match(
-            /\b(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=/,
-        );
+    async function loadLesson(lessonNumber) {
+        const { nn, variable, url } = lessonInfo(lessonNumber);
 
-        if (!declaration) {
-            throw new Error("could not find a challenge variable declaration");
+        if (unsafeWindow[variable] === undefined) {
+            await loadScript(url);
         }
 
-        const variable = declaration[1];
-        const assignmentEnd = declaration.index + declaration[0].length;
-        const objectLiteral = extractObjectLiteral(source, assignmentEnd);
-
-        // The challenge files use JavaScript/JSON5-style object literals
-        // (e.g. unquoted keys, single quotes, comments, trailing commas).
-        // Parse the data without eval/Function so Python Coach's CSP is respected.
-        const challenges = JSON5.parse(objectLiteral);
+        const challenges = unsafeWindow[variable];
 
         if (
+            challenges === undefined ||
             challenges === null ||
             typeof challenges !== "object" ||
             Array.isArray(challenges)
         ) {
-            throw new Error(`${variable} did not parse to an object`);
+            throw new Error(
+                `${variable} was not exposed as a challenge object after loading ${url}`,
+            );
         }
-
-        return { variable, challenges };
-    }
-
-    async function fetchLesson(lessonNumber) {
-        const { nn, url } = lessonInfo(lessonNumber);
-        const response = await fetch(url, {
-            credentials: "same-origin",
-        });
-
-        if (response.status === 404) {
-            return null;
-        }
-
-        if (!response.ok) {
-            throw new Error(`lesson ${nn}: HTTP ${response.status}`);
-        }
-
-        const source = await response.text();
-        const { variable, challenges } = parseLessonSource(source);
 
         console.log(
             `${PREFIX} lesson ${nn} (${variable}): ${Object.keys(challenges).length} challenge(s)`,
@@ -188,61 +97,37 @@
     async function fetchAllChallenges() {
         console.log(`${PREFIX} fetching lessons 01-${MAX_LESSON}...`);
 
-        const queue = Array.from(
-            { length: MAX_LESSON },
-            (_, index) => index + 1,
-        );
-
         const lessons = {};
         const allChallenges = {};
         const errors = [];
-        let cursor = 0;
 
-        async function worker() {
-            while (cursor < queue.length) {
-                const index = cursor;
-                cursor += 1;
+        for (let lessonNumber = 1; lessonNumber <= MAX_LESSON; lessonNumber += 1) {
+            try {
+                const result = await loadLesson(lessonNumber);
 
-                const lessonNumber = queue[index];
+                lessons[result.variable] = result.challenges;
 
-                try {
-                    const result = await fetchLesson(lessonNumber);
-
-                    if (!result) {
-                        continue;
+                for (const [id, challenge] of Object.entries(result.challenges)) {
+                    if (Object.hasOwn(allChallenges, id)) {
+                        console.warn(
+                            `${PREFIX} duplicate challenge ID ${id}; overwriting previous value`,
+                        );
                     }
 
-                    lessons[result.variable] = result.challenges;
-
-                    for (const [id, challenge] of Object.entries(result.challenges)) {
-                        if (Object.hasOwn(allChallenges, id)) {
-                            console.warn(
-                                `${PREFIX} duplicate challenge ID ${id}; overwriting previous value`,
-                            );
-                        }
-
-                        allChallenges[id] = challenge;
-                    }
-                } catch (error) {
-                    errors.push({
-                        lesson: lessonNumber,
-                        error: String(error),
-                    });
-
-                    console.error(
-                        `${PREFIX} lesson ${String(lessonNumber).padStart(2, "0")} failed:`,
-                        error,
-                    );
+                    allChallenges[id] = challenge;
                 }
+            } catch (error) {
+                errors.push({
+                    lesson: lessonNumber,
+                    error: String(error),
+                });
+
+                console.error(
+                    `${PREFIX} lesson ${String(lessonNumber).padStart(2, "0")} failed:`,
+                    error,
+                );
             }
         }
-
-        await Promise.all(
-            Array.from(
-                { length: CONCURRENCY },
-                () => worker(),
-            ),
-        );
 
         const sortedLessons = Object.fromEntries(
             Object.entries(lessons).sort(([a], [b]) =>
