@@ -3,11 +3,12 @@
 // @namespace    https://github.com/eitaar/pyco-tools
 // @updateURL    https://raw.githubusercontent.com/eitaar/pyco-tools/main/userscripts/pyco-extract.user.js
 // @downloadURL  https://raw.githubusercontent.com/eitaar/pyco-tools/main/userscripts/pyco-extract.user.js
-// @version      2.1.0
+// @version      2.2.0
 // @description  Fetches all Python Coach challenge files and combines them into one JSON object.
 // @match        https://pythoncoach.org/*
 // @match        https://www.pythoncoach.org/*
 // @run-at       document-start
+// @require      https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @grant        GM_registerMenuCommand
 // @grant        GM_setClipboard
 // @license      MIT
@@ -35,6 +36,90 @@
         };
     }
 
+    function extractObjectLiteral(source, fromIndex) {
+        const start = source.indexOf("{", fromIndex);
+
+        if (start === -1) {
+            throw new Error("could not find challenge object literal");
+        }
+
+        let depth = 0;
+        let quote = null;
+        let escaped = false;
+        let lineComment = false;
+        let blockComment = false;
+
+        for (let i = start; i < source.length; i += 1) {
+            const char = source[i];
+            const next = source[i + 1];
+
+            if (lineComment) {
+                if (char === "\n") {
+                    lineComment = false;
+                }
+                continue;
+            }
+
+            if (blockComment) {
+                if (char === "*" && next === "/") {
+                    blockComment = false;
+                    i += 1;
+                }
+                continue;
+            }
+
+            if (quote !== null) {
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+
+                if (char === "\\") {
+                    escaped = true;
+                    continue;
+                }
+
+                if (char === quote) {
+                    quote = null;
+                }
+
+                continue;
+            }
+
+            if (char === "/" && next === "/") {
+                lineComment = true;
+                i += 1;
+                continue;
+            }
+
+            if (char === "/" && next === "*") {
+                blockComment = true;
+                i += 1;
+                continue;
+            }
+
+            if (char === "'" || char === "\"") {
+                quote = char;
+                continue;
+            }
+
+            if (char === "{") {
+                depth += 1;
+                continue;
+            }
+
+            if (char === "}") {
+                depth -= 1;
+
+                if (depth === 0) {
+                    return source.slice(start, i + 1);
+                }
+            }
+        }
+
+        throw new Error("unterminated challenge object literal");
+    }
+
     function parseLessonSource(source) {
         const declaration = source.match(
             /\b(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=/,
@@ -45,21 +130,20 @@
         }
 
         const variable = declaration[1];
+        const assignmentEnd = declaration.index + declaration[0].length;
+        const objectLiteral = extractObjectLiteral(source, assignmentEnd);
 
-        // These files contain JavaScript object literals, not necessarily strict JSON
-        // (for example: unquoted keys, single quotes, or trailing commas).
-        // Evaluate the fetched same-origin script inside an isolated Function scope,
-        // then immediately serialize the resulting plain data back to JSON later.
-        const challenges = Function(
-            `"use strict";\n${source}\nreturn ${variable};`,
-        )();
+        // The challenge files use JavaScript/JSON5-style object literals
+        // (e.g. unquoted keys, single quotes, comments, trailing commas).
+        // Parse the data without eval/Function so Python Coach's CSP is respected.
+        const challenges = JSON5.parse(objectLiteral);
 
         if (
             challenges === null ||
             typeof challenges !== "object" ||
             Array.isArray(challenges)
         ) {
-            throw new Error(`${variable} did not evaluate to an object`);
+            throw new Error(`${variable} did not parse to an object`);
         }
 
         return { variable, challenges };
